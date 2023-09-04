@@ -70,6 +70,7 @@ public class MysqlServer {
         }
 
         // start accept thread
+        // 单线程阻塞式accept socket
         listener = ThreadPoolManager.newDaemonCacheThreadPool(1, "MySQL-Protocol-Listener", true);
         running = true;
         listenerFuture = listener.submit(new Listener());

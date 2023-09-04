@@ -151,6 +151,8 @@ public class ConnectScheduler {
         return infos;
     }
 
+    // 一次socket请求的处理逻辑
+    // 由ConnectProcessor处理单次请求
     private class LoopHandler implements Runnable {
         ConnectContext context;
 

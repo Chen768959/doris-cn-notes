@@ -104,7 +104,8 @@ under the License.
                 <artifactId>maven-thrift-plugin</artifactId>
                 <version>0.1.11</version>
                 <configuration>
-                    <thriftExecutable>${doris.thirdparty}/installed/bin/thrift</thriftExecutable>
+<!--                    <thriftExecutable>${doris.thirdparty}/installed/bin/thrift</thriftExecutable>-->
+                    <thriftExecutable>D:\code\java\doris-cn-notes\thirdparty\installed\bin\thrift-0.13.0.exe</thriftExecutable>
                     <thriftSourceRoot>${doris.home}/gensrc/thrift</thriftSourceRoot>
                     <generator>java:fullcamel</generator>
                 </configuration>

@@ -321,6 +321,7 @@ public class StmtExecutor implements ProfileWriter {
         context.setQueryId(queryId);
 
         try {
+            // parsedStmt为此次查询的sql语法树
             if (context.isTxnModel() && !(parsedStmt instanceof InsertStmt)
                     && !(parsedStmt instanceof TransactionStmt)) {
                 throw new TException("This is in a transaction, only insert, commit, rollback is acceptable.");
@@ -328,7 +329,7 @@ public class StmtExecutor implements ProfileWriter {
             // support select hint e.g. select /*+ SET_VAR(query_timeout=1) */ sleep(3);
             analyzeVariablesInStmt();
 
-            if (!context.isTxnModel()) {
+            if (!context.isTxnModel()) {// 不启动事务
                 // analyze this query
                 analyze(context.getSessionVariable().toThrift());
                 if (isForwardToMaster()) {
@@ -353,9 +354,10 @@ public class StmtExecutor implements ProfileWriter {
                 parsedStmt.analyze(analyzer);
             }
 
+            // 根据sql类型不同，做不同处理
             if (parsedStmt instanceof QueryStmt) {
                 context.getState().setIsQuery(true);
-                if (!((QueryStmt) parsedStmt).isExplain()) {
+                if (!((QueryStmt) parsedStmt).isExplain()) {// 如果此次sql非仅explain
                     // sql/sqlHash block
                     try {
                         Catalog.getCurrentCatalog().getSqlBlockRuleMgr().matchSql(originStmt.originStmt, context.getSqlHash(), context.getQualifiedUser());
@@ -432,7 +434,7 @@ public class StmtExecutor implements ProfileWriter {
                 } finally {
                     QeProcessorImpl.INSTANCE.unregisterQuery(context.queryId());
                 }
-            } else if (parsedStmt instanceof DdlStmt) {
+            } else if (parsedStmt instanceof DdlStmt) {// update等操作
                 handleDdlStmt();
             } else if (parsedStmt instanceof ShowStmt) {
                 handleShow();
@@ -940,11 +942,13 @@ public class StmtExecutor implements ProfileWriter {
         //
         // 2. If this is a query, send the result expr fields first, and send result data back to client.
         RowBatch batch;
+
         coord = new Coordinator(context, analyzer, planner);
         QeProcessorImpl.INSTANCE.registerQuery(context.queryId(),
                 new QeProcessorImpl.QueryInfo(context, originStmt.originStmt, coord));
         coord.setProfileWriter(this);
         coord.exec();
+
         plannerProfile.setQueryScheduleFinishTime();
         writeProfile(false);
         while (true) {
