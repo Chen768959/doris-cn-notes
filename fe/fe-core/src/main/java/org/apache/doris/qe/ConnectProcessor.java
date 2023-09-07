@@ -212,6 +212,12 @@ public class ConnectProcessor {
                 parsedStmt = stmts.get(i);
                 parsedStmt.setOrigStmt(new OriginStatement(originStmt, i));
                 parsedStmt.setUserInfo(ctx.getCurrentUserIdentity());
+
+                /**
+                 * 执行stmt {@link StmtExecutor#execute(TUniqueId)}
+                 * 内部根据sql语法类型的不同使用不同的处理方法。
+                 * 最主要的查询sql为{@link StmtExecutor#handleQueryStmt()}
+                 * */
                 executor = new StmtExecutor(ctx, parsedStmt);
                 ctx.setExecutor(executor);
                 executor.execute();

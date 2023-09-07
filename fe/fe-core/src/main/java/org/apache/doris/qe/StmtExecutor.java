@@ -912,6 +912,7 @@ public class StmtExecutor implements ProfileWriter {
             }
         }
 
+        // 此次查询只是查执行计划
         if (queryStmt.isExplain()) {
             String explainString = planner.getExplainString(planner.getFragments(), queryStmt.getExplainOptions());
             handleExplainStmt(explainString);
@@ -923,11 +924,14 @@ public class StmtExecutor implements ProfileWriter {
         boolean isOutfileQuery = queryStmt.hasOutFileClause();
 
         // Sql and PartitionCache
+        // 命中缓存
         CacheAnalyzer cacheAnalyzer = new CacheAnalyzer(context, parsedStmt, planner);
         if (cacheAnalyzer.enableCache() && !isOutfileQuery && queryStmt instanceof SelectStmt) {
             handleCacheStmt(cacheAnalyzer, channel, (SelectStmt) queryStmt);
             return;
         }
+
+        // 上面各逻辑会校验出无需请求be的情况，到达此处才真正开始执行fe-be查询
         sendResult(isOutfileQuery, false, queryStmt, channel, null, null);
     }
 
