@@ -329,8 +329,12 @@ public class StmtExecutor implements ProfileWriter {
             // support select hint e.g. select /*+ SET_VAR(query_timeout=1) */ sleep(3);
             analyzeVariablesInStmt();
 
-            if (!context.isTxnModel()) {// 不启动事务
+            if (!context.isTxnModel()) {// 如果不启动事务
                 // analyze this query
+                /**
+                 * 创建查询计划对象planner，并根据节点数生成对应查询计划
+                 * {@link this#analyzeAndGenerateQueryPlan(TQueryOptions)}
+                 */
                 analyze(context.getSessionVariable().toThrift());
                 if (isForwardToMaster()) {
                     if (isProxy) {
@@ -391,6 +395,7 @@ public class StmtExecutor implements ProfileWriter {
                             AuditLog.getQueryAudit().log("Query {} {} times with new query id: {}", DebugUtil.printId(queryId), i, DebugUtil.printId(newQueryId));
                             context.setQueryId(newQueryId);
                         }
+                        // 创建Coordinator并执行
                         handleQueryStmt();
                         // explain query stmt do not have profile
                         if (!((QueryStmt) parsedStmt).isExplain()) {
@@ -543,6 +548,7 @@ public class StmtExecutor implements ProfileWriter {
             LOG.debug("begin to analyze stmt: {}, forwarded stmt id: {}", context.getStmtId(), context.getForwardedStmtId());
         }
 
+        // 如果sql字符串未被解析，则此处也会被解析成语法树
         parse();
 
         // yiguolei: insert stmt's grammar analysis will write editlog, so that we check if the stmt should be forward to master here
@@ -947,6 +953,14 @@ public class StmtExecutor implements ProfileWriter {
         // 2. If this is a query, send the result expr fields first, and send result data back to client.
         RowBatch batch;
 
+        /**
+         * planner(执行计划，由多个可在单台be上执行的plan fragment构成)
+         * 由{@link this#analyzeAndGenerateQueryPlan(TQueryOptions)}创建。
+         *
+         * Coordinator：
+         * 协调者节点，当前收到请求的fe节点，就是此次请求的Coordinator节点。
+         * fe Coordinator最重要的作用就是执行plan fragment
+         */
         coord = new Coordinator(context, analyzer, planner);
         QeProcessorImpl.INSTANCE.registerQuery(context.queryId(),
                 new QeProcessorImpl.QueryInfo(context, originStmt.originStmt, coord));
