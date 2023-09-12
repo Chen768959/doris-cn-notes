@@ -405,21 +405,25 @@ public class Coordinator {
     }
 
     // Initialize
+    // 初始化fragmentExecParamsMap + inputFragments
     private void prepare() {
+        // 获取fragment id与fragment的映射map
         for (PlanFragment fragment : fragments) {
             fragmentExecParamsMap.put(fragment.getFragmentId(), new FragmentExecParams(fragment));
         }
 
         // set inputFragments
+        // 从所有fragment中找到“sink为其他节点”的fragment，将其作为inputFragments
         for (PlanFragment fragment : fragments) {
+            // DataStreamSink：从一个节点发送至另一个节点时，目标节点即DataStreamSink
             if (!(fragment.getSink() instanceof DataStreamSink)) {
                 continue;
             }
             FragmentExecParams params = fragmentExecParamsMap.get(fragment.getDestFragment().getFragmentId());
             params.inputFragments.add(fragment.getFragmentId());
-
         }
 
+        // 当前节点（coordinate）地址
         coordAddress = new TNetworkAddress(localIP, Config.rpc_port);
 
         int fragmentSize = fragments.size();
@@ -431,6 +435,7 @@ public class Coordinator {
             queryProfile.addChild(fragmentProfile.get(i));
         }
 
+        // debug日志输出
         this.idToBackend = Catalog.getCurrentSystemInfo().getIdToBackend();
         if (LOG.isDebugEnabled()) {
             LOG.debug("idToBackend size={}", idToBackend.size());
@@ -486,15 +491,24 @@ public class Coordinator {
                     DebugUtil.printId(queryId), fragments.get(0).toThrift());
         }
 
+        /**
+         * 此时fragments已经存在了，在创建当前Coordinator时传入。
+         * fragments由{@link StmtExecutor#analyzeAndGenerateQueryPlan(TQueryOptions)}创建
+         */
+
         // prepare information
+        // 初始化fragmentExecParamsMap + inputFragments
         prepare();
         // compute Fragment Instance
         computeScanRangeAssignment();
 
         computeFragmentExecParams();
 
+        // debug模式下，打印此次query涉及的fragment信息
         traceInstance();
 
+        // 更新当前用户的查询实例（并行执行的查询任务涉及的节点数）
+        // 如果超过限制则报错终止
         QeProcessorImpl.INSTANCE.registerInstances(queryId, instanceIds.size());
 
         // create result receiver
@@ -1444,6 +1458,8 @@ public class Coordinator {
     private void computeScanRangeAssignment() throws Exception {
         HashMap<TNetworkAddress, Long> assignedBytesPerHost = Maps.newHashMap();
         // set scan ranges/locations for scan nodes
+        // scanNodes来自planer，
+        // scanNodes时所有“扫描节点”的基类，该node负责扫描读取数据，供后续node使用
         for (ScanNode scanNode : scanNodes) {
             // the parameters of getScanRangeLocations may ignore, It dosn't take effect
             List<TScanRangeLocations> locations = scanNode.getScanRangeLocations(0);
@@ -2202,6 +2218,7 @@ public class Coordinator {
         public List<TPlanFragmentDestination> destinations = Lists.newArrayList();
         public Map<Integer, Integer> perExchNumSenders = Maps.newHashMap();
 
+        // inputFragments中的fragment都会将数据发送至其他节点
         public List<PlanFragmentId> inputFragments = Lists.newArrayList();
         public List<FInstanceExecParam> instanceExecParams = Lists.newArrayList();
         public FragmentScanRangeAssignment scanRangeAssignment = new FragmentScanRangeAssignment();
