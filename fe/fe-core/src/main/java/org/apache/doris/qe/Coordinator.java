@@ -499,9 +499,14 @@ public class Coordinator {
         // prepare information
         // 初始化fragmentExecParamsMap + inputFragments
         prepare();
+
         // compute Fragment Instance
+        // 判断此次查询是否存在“Colocate Join”或“Shuffle Join”，如果存在则初始化相关参数
+        // Colocate Join：相同关联键的数据集都在本地的前提下，可以使用“Colocate Join”，Colocate Join会在单节点上进行数据集合并，不涉及网络传输
+        // Shuffle Join：将数据集按照关联键重新分发shuffle，涉及网络传输
         computeScanRangeAssignment();
 
+        // 计算并设置fragment们的网络信息等参数
         computeFragmentExecParams();
 
         // debug模式下，打印此次query涉及的fragment信息
@@ -516,6 +521,7 @@ public class Coordinator {
         FragmentExecParams topParams = fragmentExecParamsMap.get(topId);
         DataSink topDataSink = topParams.fragment.getSink();
         this.timeoutDeadline = System.currentTimeMillis() + queryOptions.query_timeout * 1000;
+        // 如果最后一个fragment的sink不是resultSink，其结果可能是被加载到外部系统上了
         if (topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink) {
             TNetworkAddress execBeAddr = topParams.instanceExecParams.get(0).host;
             receiver = new ResultReceiver(topParams.instanceExecParams.get(0).instanceId,
