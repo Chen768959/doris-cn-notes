@@ -502,7 +502,8 @@ public class Coordinator {
 
         // compute Fragment Instance
         // 判断此次查询是否存在“Colocate Join”或“Shuffle Join”，如果存在则初始化相关参数
-        // Colocate Join：相同关联键的数据集都在本地的前提下，可以使用“Colocate Join”，Colocate Join会在单节点上进行数据集合并，不涉及网络传输
+        // Colocate Join：相同关联键的数据集都在本地的前提下，可以使用“Colocate Join”，
+        //                Colocate Join会在单节点上进行数据集合并，不涉及网络传输
         // Shuffle Join：将数据集按照关联键重新分发shuffle，涉及网络传输
         computeScanRangeAssignment();
 
@@ -517,12 +518,14 @@ public class Coordinator {
         QeProcessorImpl.INSTANCE.registerInstances(queryId, instanceIds.size());
 
         // create result receiver
+        // 根据最后一个fragment的resultSink，获取最终结果的receiver
         PlanFragmentId topId = fragments.get(0).getFragmentId();
         FragmentExecParams topParams = fragmentExecParamsMap.get(topId);
         DataSink topDataSink = topParams.fragment.getSink();
         this.timeoutDeadline = System.currentTimeMillis() + queryOptions.query_timeout * 1000;
         // 如果最后一个fragment的sink不是resultSink，其结果可能是被加载到外部系统上了
         if (topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink) {
+            // 根据最后一个fragment的resultSink，可知其目标节点，从而获得receiver对象
             TNetworkAddress execBeAddr = topParams.instanceExecParams.get(0).host;
             receiver = new ResultReceiver(topParams.instanceExecParams.get(0).instanceId,
                     addressToBackendID.get(execBeAddr), toBrpcHost(execBeAddr), this.timeoutDeadline);
@@ -587,8 +590,10 @@ public class Coordinator {
      * @throws UserException
      */
     private void sendFragment() throws TException, RpcException, UserException {
+        // Coordinator内对象锁，不同Coordinator对象之间不影响
         lock();
         try {
+            // 统计此次查询中，每个host节点的涉及次数
             Multiset<TNetworkAddress> hostCounter = HashMultiset.create();
             for (FragmentExecParams params : fragmentExecParamsMap.values()) {
                 for (FInstanceExecParam fi : params.instanceExecParams) {
@@ -599,21 +604,28 @@ public class Coordinator {
             int backendIdx = 0;
             int profileFragmentId = 0;
             long memoryLimit = queryOptions.getMemLimit();
-            Map<Long, BackendExecStates> beToExecStates = Maps.newHashMap();
+            Map<Long, BackendExecStates> beToExecStates = Maps.newHashMap();// 存储后续每一个be的执行状态
             // If #fragments >=2, use twoPhaseExecution with exec_plan_fragments_prepare and exec_plan_fragments_start,
             // else use exec_plan_fragments directly.
             // we choose #fragments >=2 because in some cases
             // we need ensure that A fragment is already prepared to receive data before B fragment sends data.
+            // 如果fragments数量大于1，则开启“两阶段执行”
             boolean twoPhaseExecution = fragments.size() >= 2;
+
+            // 遍历所有fragment，设置每个fragment的“fragmentInstance执行参数”与其对应的“states执行状态对象”
             for (PlanFragment fragment : fragments) {
                 FragmentExecParams params = fragmentExecParamsMap.get(fragment.getFragmentId());
 
                 // 1. set up exec states
+                // 为FragmentExecParams设置此次查询的Id（顺序累加）
                 int instanceNum = params.instanceExecParams.size();
+                // 检查当前fragment的fragmentInstance数量（fragmentInstance代表了具体的be节点执行计划，所以肯定至少有1各节点参与fragment执行）
                 Preconditions.checkState(instanceNum > 0);
+                // 所有fragmentInstance的执行参数
                 List<TExecPlanFragmentParams> tParams = params.toThrift(backendIdx);
 
                 // 2. update memory limit for colocate join
+                // 如果该fragment属于colocate join操作，则“为该fragment的每一个fragmentInstance增加内存限制参数”
                 if (colocateFragmentIds.contains(fragment.getFragmentId().asInt())) {
                     int rate = Math.min(Config.query_colocate_join_memory_limit_penalty_factor, instanceNum);
                     long newMemory = memoryLimit / rate;
@@ -632,6 +644,8 @@ public class Coordinator {
                 }
 
                 // 3. group BackendExecState by BE. So that we can use one RPC to send all fragment instances of a BE.
+                // 创建所有fragmentInstance的states状态对象，
+                // BackendExecStates的对应粒度是fragment中的fragmentInstance实例对象
                 int instanceId = 0;
                 for (TExecPlanFragmentParams tParam : tParams) {
                     BackendExecState execState =
@@ -651,6 +665,8 @@ public class Coordinator {
                         }
                     }
 
+                    // 每一个be的执行状态对象，也对应了一个fragmentInstance执行参数对象
+                    // 由此可见执行状态对象的粒度是"fragmentInstance"，一个fragment有多少fragmentInstance就有多少states
                     BackendExecStates states = beToExecStates.get(execState.backend.getId());
                     if (states == null) {
                         states = new BackendExecStates(execState.backend.getId(), execState.brpcAddress,
@@ -663,7 +679,12 @@ public class Coordinator {
                 profileFragmentId += 1;
             } // end for fragments
 
+            // 至此所有fragment中的fragmentInstances的对应states创建设置完毕
+            // 注意，所有的states是有序的，
+            // 因为遍历的fragment是有序的，创建完毕一个fragment的所有states后，才会继续遍历下一个fragment
+
             // 4. send and wait fragments rpc
+            // 将所有fragmentInstance的states依次装入futures，异步执行请求并等待响应
             List<Pair<BackendExecStates, Future<InternalService.PExecPlanFragmentResult>>> futures = Lists.newArrayList();
             for (BackendExecStates states : beToExecStates.values()) {
                 states.unsetFields();
@@ -671,7 +692,7 @@ public class Coordinator {
             }
             waitRpc(futures, this.timeoutDeadline - System.currentTimeMillis(), "send fragments");
 
-            if (twoPhaseExecution) {
+            if (twoPhaseExecution) {//fragment的数量如果大于1，则还需要执行一轮
                 // 5. send and wait execution start rpc
                 futures.clear();
                 for (BackendExecStates states : beToExecStates.values()) {
@@ -2219,6 +2240,7 @@ public class Coordinator {
     // execution parameters for a single fragment,
     // per-fragment can have multiple FInstanceExecParam,
     // used to assemble TPlanFragmentExecParas
+    // 一个FragmentExecParams对应一个fragment
     protected class FragmentExecParams {
         public PlanFragment fragment;
         public List<TPlanFragmentDestination> destinations = Lists.newArrayList();
@@ -2226,6 +2248,10 @@ public class Coordinator {
 
         // inputFragments中的fragment都会将数据发送至其他节点
         public List<PlanFragmentId> inputFragments = Lists.newArrayList();
+        // fragment只是一个逻辑概念，代表了一个计算计划
+        // 而一个fragment中包含了多个“FragmentInstance”，表示一组可并行执行的片段实例对象
+        // 这些片段实例才是每个物理be节点的具体执行计划，
+        // List<FInstanceExecParam>就是每个片段实例的执行参数
         public List<FInstanceExecParam> instanceExecParams = Lists.newArrayList();
         public FragmentScanRangeAssignment scanRangeAssignment = new FragmentScanRangeAssignment();
 
