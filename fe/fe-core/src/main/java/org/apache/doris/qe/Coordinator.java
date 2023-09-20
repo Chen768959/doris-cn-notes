@@ -604,7 +604,8 @@ public class Coordinator {
             int backendIdx = 0;
             int profileFragmentId = 0;
             long memoryLimit = queryOptions.getMemLimit();
-            Map<Long, BackendExecStates> beToExecStates = Maps.newHashMap();// 存储后续每一个be的执行状态
+            // BackendExecStates对象中存储了单台be节点上所有被执行的fragmentInstance实例的states（执行状态）
+            Map<Long, BackendExecStates> beToExecStates = Maps.newHashMap();
             // If #fragments >=2, use twoPhaseExecution with exec_plan_fragments_prepare and exec_plan_fragments_start,
             // else use exec_plan_fragments directly.
             // we choose #fragments >=2 because in some cases
@@ -612,14 +613,18 @@ public class Coordinator {
             // 如果fragments数量大于1，则开启“两阶段执行”
             boolean twoPhaseExecution = fragments.size() >= 2;
 
-            // 遍历所有fragment，设置每个fragment的“fragmentInstance执行参数”与其对应的“states执行状态对象”
+            // 简单来说：遍历所有fragment，
+            // 将每个fragment中的fragmentInstance实例找出来，并获取其states（执行状态）
+            // 最后将这些片段实例的执行状态，装入每台be节点的总状态队列对象中（beToExecStates）
+            // 后续会根据这个beToExecStates向每台be节点发送请求，并监听每个fragmentInstance的执行状态
             for (PlanFragment fragment : fragments) {
                 FragmentExecParams params = fragmentExecParamsMap.get(fragment.getFragmentId());
 
                 // 1. set up exec states
                 // 为FragmentExecParams设置此次查询的Id（顺序累加）
                 int instanceNum = params.instanceExecParams.size();
-                // 检查当前fragment的fragmentInstance数量（fragmentInstance代表了具体的be节点执行计划，所以肯定至少有1各节点参与fragment执行）
+                // 检查当前fragment的fragmentInstance数量
+                // （fragmentInstance代表了具体的be节点执行计划，所以肯定至少有1各节点参与fragment执行）
                 Preconditions.checkState(instanceNum > 0);
                 // 所有fragmentInstance的执行参数
                 List<TExecPlanFragmentParams> tParams = params.toThrift(backendIdx);
@@ -644,10 +649,10 @@ public class Coordinator {
                 }
 
                 // 3. group BackendExecState by BE. So that we can use one RPC to send all fragment instances of a BE.
-                // 创建所有fragmentInstance的states状态对象，
-                // BackendExecStates的对应粒度是fragment中的fragmentInstance实例对象
+                // 创建所有fragmentInstance的states执行状态对象，并将这些states装入其被执行的be节点的总states对象中（BackendExecStates）
                 int instanceId = 0;
                 for (TExecPlanFragmentParams tParam : tParams) {
+                    // 创建fragmentInstance（片段实例）的对应执行状态对象
                     BackendExecState execState =
                             new BackendExecState(fragment.getFragmentId(), instanceId++, profileFragmentId, tParam, this.addressToBackendID);
                     // Each tParam will set the total number of Fragments that need to be executed on the same BE,
@@ -665,8 +670,7 @@ public class Coordinator {
                         }
                     }
 
-                    // 每一个be的执行状态对象，也对应了一个fragmentInstance执行参数对象
-                    // 由此可见执行状态对象的粒度是"fragmentInstance"，一个fragment有多少fragmentInstance就有多少states
+                    // 获取当前fragmentInstance实例的执行be节点，然后将states装入该be的states总队列对象中
                     BackendExecStates states = beToExecStates.get(execState.backend.getId());
                     if (states == null) {
                         states = new BackendExecStates(execState.backend.getId(), execState.brpcAddress,
@@ -679,12 +683,12 @@ public class Coordinator {
                 profileFragmentId += 1;
             } // end for fragments
 
-            // 至此所有fragment中的fragmentInstances的对应states创建设置完毕
-            // 注意，所有的states是有序的，
-            // 因为遍历的fragment是有序的，创建完毕一个fragment的所有states后，才会继续遍历下一个fragment
+            // 至此所有fragment中的fragmentInstances的对应states创建设置完毕，
+            // 且beToExecStates（包含了每台be节点所执行的fragmentInstance实例与对应执行状态）也装在完毕。
+            // 此时我们就已经知道了每台be节点上需要执行的fragmentInstance是什么了。
 
             // 4. send and wait fragments rpc
-            // 将所有fragmentInstance的states依次装入futures，异步执行请求并等待响应
+            // 为每一台be节点创建future对象，向此次涉及的所有be节点发送fragmentInstance计划请求，并等待响应
             List<Pair<BackendExecStates, Future<InternalService.PExecPlanFragmentResult>>> futures = Lists.newArrayList();
             for (BackendExecStates states : beToExecStates.values()) {
                 states.unsetFields();
