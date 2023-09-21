@@ -171,6 +171,7 @@ void PInternalServiceImpl<T>::exec_plan_fragment(google::protobuf::RpcController
     st.to_protobuf(response->mutable_status());
 }
 
+// 对应fe“两段请求”中第一部分的准备阶段，往be节点发送所有待处理的fragmentInstance实例对象
 template <typename T>
 void PInternalServiceImpl<T>::exec_plan_fragment_prepare(google::protobuf::RpcController* cntl_base,
                                                       const PExecPlanFragmentRequest* request,
@@ -179,6 +180,7 @@ void PInternalServiceImpl<T>::exec_plan_fragment_prepare(google::protobuf::RpcCo
     exec_plan_fragment(cntl_base, request, response, done);
 }
 
+// 对应fe“两段请求”中第二部分，开始执行fragmentInstance实例（本质上是唤醒所有fragmentInstance实例的执行线程）
 template <typename T>
 void PInternalServiceImpl<T>::exec_plan_fragment_start(google::protobuf::RpcController* controller,
                                                     const PExecPlanFragmentStartRequest* request,
@@ -286,6 +288,7 @@ Status PInternalServiceImpl<T>::_exec_plan_fragment(const std::string& ser_reque
             RETURN_IF_ERROR(deserialize_thrift_msg(buf, &len, compact, &t_request));
         }
 
+        // 依次获取当前be节点需要处理的“每一个fragmentInstance计划实例”，然后处理
         for (const TExecPlanFragmentParams& params : t_request.paramsList) {
             RETURN_IF_ERROR(_exec_env->fragment_mgr()->exec_plan_fragment(params));
         }

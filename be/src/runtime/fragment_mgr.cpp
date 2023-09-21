@@ -493,8 +493,9 @@ void FragmentMgr::_exec_actual(std::shared_ptr<FragmentExecState> exec_state, Fi
     cb(exec_state->executor());
 }
 
+// 处理单个fragmentInstance
 Status FragmentMgr::exec_plan_fragment(const TExecPlanFragmentParams& params) {
-    if (params.txn_conf.need_txn) {
+    if (params.txn_conf.need_txn) {// 事务操作
         StreamLoadContext* stream_load_cxt = new StreamLoadContext(_exec_env);
         stream_load_cxt->db = params.txn_conf.db;
         stream_load_cxt->db_id = params.txn_conf.db_id;
@@ -648,6 +649,7 @@ Status FragmentMgr::exec_plan_fragment(const TExecPlanFragmentParams& params, Fi
         _cv.notify_all();
     }
 
+    // 将fragment相关参数封装成exec_state，之后异步调用_exec_actual逻辑，最终异步执行exec_state->execute()
     auto st = _thread_pool->submit_func(
             std::bind<void>(&FragmentMgr::_exec_actual, this, exec_state, cb));
     if (!st.ok()) {
