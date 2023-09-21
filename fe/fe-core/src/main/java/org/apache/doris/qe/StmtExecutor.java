@@ -321,6 +321,7 @@ public class StmtExecutor implements ProfileWriter {
         context.setQueryId(queryId);
 
         try {
+            // parsedStmt为此次查询的sql语法树
             if (context.isTxnModel() && !(parsedStmt instanceof InsertStmt)
                     && !(parsedStmt instanceof TransactionStmt)) {
                 throw new TException("This is in a transaction, only insert, commit, rollback is acceptable.");
@@ -328,8 +329,12 @@ public class StmtExecutor implements ProfileWriter {
             // support select hint e.g. select /*+ SET_VAR(query_timeout=1) */ sleep(3);
             analyzeVariablesInStmt();
 
-            if (!context.isTxnModel()) {
+            if (!context.isTxnModel()) {// 如果不启动事务
                 // analyze this query
+                /**
+                 * 创建查询计划对象planner，并根据节点数生成对应查询计划
+                 * {@link this#analyzeAndGenerateQueryPlan(TQueryOptions)}
+                 */
                 analyze(context.getSessionVariable().toThrift());
                 if (isForwardToMaster()) {
                     if (isProxy) {
@@ -353,9 +358,10 @@ public class StmtExecutor implements ProfileWriter {
                 parsedStmt.analyze(analyzer);
             }
 
+            // 根据sql类型不同，做不同处理
             if (parsedStmt instanceof QueryStmt) {
                 context.getState().setIsQuery(true);
-                if (!((QueryStmt) parsedStmt).isExplain()) {
+                if (!((QueryStmt) parsedStmt).isExplain()) {// 如果此次sql非仅explain
                     // sql/sqlHash block
                     try {
                         Catalog.getCurrentCatalog().getSqlBlockRuleMgr().matchSql(originStmt.originStmt, context.getSqlHash(), context.getQualifiedUser());
@@ -389,6 +395,7 @@ public class StmtExecutor implements ProfileWriter {
                             AuditLog.getQueryAudit().log("Query {} {} times with new query id: {}", DebugUtil.printId(queryId), i, DebugUtil.printId(newQueryId));
                             context.setQueryId(newQueryId);
                         }
+                        // 创建Coordinator并执行
                         handleQueryStmt();
                         // explain query stmt do not have profile
                         if (!((QueryStmt) parsedStmt).isExplain()) {
@@ -432,7 +439,7 @@ public class StmtExecutor implements ProfileWriter {
                 } finally {
                     QeProcessorImpl.INSTANCE.unregisterQuery(context.queryId());
                 }
-            } else if (parsedStmt instanceof DdlStmt) {
+            } else if (parsedStmt instanceof DdlStmt) {// update等操作
                 handleDdlStmt();
             } else if (parsedStmt instanceof ShowStmt) {
                 handleShow();
@@ -541,6 +548,7 @@ public class StmtExecutor implements ProfileWriter {
             LOG.debug("begin to analyze stmt: {}, forwarded stmt id: {}", context.getStmtId(), context.getForwardedStmtId());
         }
 
+        // 如果sql字符串未被解析，则此处也会被解析成语法树
         parse();
 
         // yiguolei: insert stmt's grammar analysis will write editlog, so that we check if the stmt should be forward to master here
@@ -910,6 +918,7 @@ public class StmtExecutor implements ProfileWriter {
             }
         }
 
+        // 此次查询只是查执行计划
         if (queryStmt.isExplain()) {
             String explainString = planner.getExplainString(planner.getFragments(), queryStmt.getExplainOptions());
             handleExplainStmt(explainString);
@@ -921,11 +930,14 @@ public class StmtExecutor implements ProfileWriter {
         boolean isOutfileQuery = queryStmt.hasOutFileClause();
 
         // Sql and PartitionCache
+        // 命中缓存
         CacheAnalyzer cacheAnalyzer = new CacheAnalyzer(context, parsedStmt, planner);
         if (cacheAnalyzer.enableCache() && !isOutfileQuery && queryStmt instanceof SelectStmt) {
             handleCacheStmt(cacheAnalyzer, channel, (SelectStmt) queryStmt);
             return;
         }
+
+        // 上面各逻辑会校验出无需请求be的情况，到达此处才真正开始执行fe-be查询
         sendResult(isOutfileQuery, false, queryStmt, channel, null, null);
     }
 
@@ -940,11 +952,21 @@ public class StmtExecutor implements ProfileWriter {
         //
         // 2. If this is a query, send the result expr fields first, and send result data back to client.
         RowBatch batch;
+
+        /**
+         * planner(执行计划，由多个可在单台be上执行的plan fragment构成)
+         * 由{@link this#analyzeAndGenerateQueryPlan(TQueryOptions)}创建。
+         *
+         * Coordinator：
+         * 协调者节点，当前收到请求的fe节点，就是此次请求的Coordinator节点。
+         * fe Coordinator最重要的作用就是执行plan fragment
+         */
         coord = new Coordinator(context, analyzer, planner);
         QeProcessorImpl.INSTANCE.registerQuery(context.queryId(),
                 new QeProcessorImpl.QueryInfo(context, originStmt.originStmt, coord));
         coord.setProfileWriter(this);
         coord.exec();
+
         plannerProfile.setQueryScheduleFinishTime();
         writeProfile(false);
         while (true) {

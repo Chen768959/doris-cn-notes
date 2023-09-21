@@ -72,6 +72,9 @@ public class ConnectProcessor {
     private static final Logger LOG = LogManager.getLogger(ConnectProcessor.class);
 
     private final ConnectContext ctx;
+    /**
+     * 从channel中读取的请求内容
+     */
     private ByteBuffer packetBuf;
 
     private StmtExecutor executor = null;
@@ -197,7 +200,9 @@ public class ConnectProcessor {
         List<Pair<StatementBase, Data.PQueryStatistics>> auditInfoList = Lists.newArrayList();
         boolean alreadyAddedToAuditInfoList = false;
         try {
+            // 将原始sql字符串解析为树结构（一个StatementBase代表一条完整的sql语法树）
             List<StatementBase> stmts = analyze(originStmt);
+            // 依次执行各stmt
             for (int i = 0; i < stmts.size(); ++i) {
                 alreadyAddedToAuditInfoList = false;
                 ctx.getState().reset();
@@ -207,10 +212,17 @@ public class ConnectProcessor {
                 parsedStmt = stmts.get(i);
                 parsedStmt.setOrigStmt(new OriginStatement(originStmt, i));
                 parsedStmt.setUserInfo(ctx.getCurrentUserIdentity());
+
+                /**
+                 * 执行stmt {@link StmtExecutor#execute(TUniqueId)}
+                 * 内部根据sql语法类型的不同使用不同的处理方法。
+                 * 最主要的查询sql为{@link StmtExecutor#handleQueryStmt()}
+                 * */
                 executor = new StmtExecutor(ctx, parsedStmt);
                 ctx.setExecutor(executor);
                 executor.execute();
 
+                // 每个sql处理完后，都会向socket客户端发送一个响应包，里面包含执行结果信息
                 if (i != stmts.size() - 1) {
                     ctx.getState().serverStatus |= MysqlServerStatusFlag.SERVER_MORE_RESULTS_EXISTS;
                     finalizeCommand();
@@ -328,6 +340,7 @@ public class ConnectProcessor {
 
     private void dispatch() throws IOException {
         int code = packetBuf.get();
+        // 根据请求的首字符的int值来确定此次请求的类型
         MysqlCommand command = MysqlCommand.fromCode(code);
         if (command == null) {
             ErrorReport.report(ErrorCode.ERR_UNKNOWN_COM_ERROR);

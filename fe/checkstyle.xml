@@ -22,7 +22,7 @@
         "http://www.puppycrawl.com/dtds/configuration_1_3.dtd">
 <module name="Checker">
     <module name="Header">
-        <property name="headerFile" value="checkstyle-apache-header.txt"/>
+        <property name="headerFile" value="D:\code\java\doris-cn-notes\fe\checkstyle-apache-header.txt"/>
         <property name="fileExtensions" value="java"/>
     </module>
     <module name="SuppressWarningsFilter"/>

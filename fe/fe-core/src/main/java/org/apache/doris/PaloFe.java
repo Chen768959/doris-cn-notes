@@ -30,6 +30,7 @@ import org.apache.doris.httpv2.HttpServer;
 import org.apache.doris.journal.bdbje.BDBDebugger;
 import org.apache.doris.journal.bdbje.BDBTool;
 import org.apache.doris.journal.bdbje.BDBToolOptions;
+import org.apache.doris.qe.ConnectScheduler;
 import org.apache.doris.qe.QeService;
 import org.apache.doris.service.ExecuteEnv;
 import org.apache.doris.service.FeServer;
@@ -132,6 +133,7 @@ public class PaloFe {
             // 1. HttpServer for HTTP Server
             // 2. FeServer for Thrift Server
             // 3. QeService for MySQL Server
+            // ExecuteEnv.getInstance().getScheduler()是具体socket请求的work线程池
             QeService qeService = new QeService(Config.query_port, Config.mysql_service_nio_enabled, ExecuteEnv.getInstance().getScheduler());
             FeServer feServer = new FeServer(Config.rpc_port);
 
@@ -144,7 +146,13 @@ public class PaloFe {
             httpServer.setSelectors(Config.jetty_server_selectors);
             httpServer.setWorkers(Config.jetty_server_workers);
             httpServer.start(dorisHomeDir);
-            
+
+            /**
+             * 启动ServerSocket，监听本地http端口（Config.http_port），
+             * 然后开启新线程，阻塞式的accept socket请求{@link org.apache.doris.mysql.MysqlServer.Listener}
+             *
+             * 拿到socket请求后，封装成Context后创建Runnable对象{@link ConnectScheduler.LoopHandler}交由work线程池逻辑处理
+             */
             qeService.start();
 
             ThreadPoolManager.registerAllThreadPoolMetric();
