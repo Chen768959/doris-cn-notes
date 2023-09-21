@@ -692,6 +692,7 @@ public class Coordinator {
             List<Pair<BackendExecStates, Future<InternalService.PExecPlanFragmentResult>>> futures = Lists.newArrayList();
             for (BackendExecStates states : beToExecStates.values()) {
                 states.unsetFields();
+                // execRemoteFragmentsAsync：将单台be节点的所有待执行fragmentInstances发送过去（此时be接收到后并未执行，只是阻塞等待）
                 futures.add(Pair.create(states, states.execRemoteFragmentsAsync()));
             }
             waitRpc(futures, this.timeoutDeadline - System.currentTimeMillis(), "send fragments");
@@ -700,6 +701,7 @@ public class Coordinator {
                 // 5. send and wait execution start rpc
                 futures.clear();
                 for (BackendExecStates states : beToExecStates.values()) {
+                    // execPlanFragmentStartAsync：单台be节点开始执行其fragmentInstances计划（唤醒be的执行线程）
                     futures.add(Pair.create(states, states.execPlanFragmentStartAsync()));
                 }
                 waitRpc(futures, this.timeoutDeadline - System.currentTimeMillis(), "send execution start");
@@ -717,7 +719,7 @@ public class Coordinator {
             throw new UserException("timeout before waiting for " + operation + " RPC. Elapse(sec): " + (
                     (System.currentTimeMillis() - timeoutDeadline) / 1000 + queryOptions.query_timeout));
         }
-        
+
         for (Pair<BackendExecStates, Future<PExecPlanFragmentResult>> pair : futures) {
             TStatusCode code;
             String errMsg = null;
@@ -745,6 +747,7 @@ public class Coordinator {
                         + ((System.currentTimeMillis() - timeoutDeadline) / 1000 + queryOptions.query_timeout);
                 code = TStatusCode.TIMEOUT;
             }
+
 
             if (code != TStatusCode.OK) {
                 if (exception != null && errMsg == null) {
