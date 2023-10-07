@@ -229,6 +229,7 @@ Status FragmentExecState::prepare(const TExecPlanFragmentParams& params) {
 }
 
 Status FragmentExecState::execute() {
+    // 等待fe发起第二段启动命令
     if (_need_wait_execution_trigger) {
         // if _need_wait_execution_trigger is true, which means this instance
         // is prepared but need to wait for the signal to do the rest execution.
@@ -238,6 +239,7 @@ Status FragmentExecState::execute() {
     {
         SCOPED_RAW_TIMER(&duration_ns);
         CgroupsMgr::apply_system_cgroup();
+        // 调用open()，触发当前fragmentInstance的整个执行链路。
         WARN_IF_ERROR(_executor.open(), strings::Substitute("Got error while opening fragment $0",
                                                             print_id(_fragment_instance_id)));
         _executor.close();
@@ -471,6 +473,7 @@ void FragmentMgr::_exec_actual(std::shared_ptr<FragmentExecState> exec_state, Fi
             .query_id(exec_state->query_id())
             .instance_id(exec_state->fragment_instance_id())
             .tag("pthread_id", std::to_string((uintptr_t)pthread_self()));
+
     exec_state->execute();
 
     std::shared_ptr<QueryFragmentsCtx> fragments_ctx = exec_state->get_fragments_ctx();
@@ -632,6 +635,8 @@ Status FragmentMgr::exec_plan_fragment(const TExecPlanFragmentParams& params, Fi
     exec_state.reset(new FragmentExecState(fragments_ctx->query_id,
                                            params.params.fragment_instance_id, params.backend_num,
                                            _exec_env, fragments_ctx));
+
+    // 当前逻辑属于第一段请求，判断是否存在二段请求（只要fragment数大于，都会涉及二段请求），即由第二段请求来触发第一段请求的开始执行。
     if (params.__isset.need_wait_execution_trigger && params.need_wait_execution_trigger) {
         // set need_wait_execution_trigger means this instance will not actually being executed
         // until the execPlanFragmentStart RPC trigger to start it.

@@ -164,6 +164,7 @@ void PInternalServiceImpl<T>::exec_plan_fragment(google::protobuf::RpcController
     bool compact = request->has_compact() ? request->compact() : false;
     PFragmentRequestVersion version =
             request->has_version() ? request->version() : PFragmentRequestVersion::VERSION_1;
+    // 处理单次请求，request中包含当前节点需处理的各个fragmentInstance
     st = _exec_plan_fragment(request->request(), version, compact);
     if (!st.ok()) {
         LOG(WARNING) << "exec plan fragment failed, errmsg=" << st.get_error_msg();
@@ -280,6 +281,7 @@ Status PInternalServiceImpl<T>::_exec_plan_fragment(const std::string& ser_reque
             RETURN_IF_ERROR(deserialize_thrift_msg(buf, &len, compact, &t_request));
         }
         return _exec_env->fragment_mgr()->exec_plan_fragment(t_request);
+    // 后续版本将删除v1.1，仅使用v1.2版本
     } else if (version == PFragmentRequestVersion::VERSION_2) {
         TExecPlanFragmentParamsList t_request;
         {
