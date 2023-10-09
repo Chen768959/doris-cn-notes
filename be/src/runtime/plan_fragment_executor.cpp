@@ -251,6 +251,16 @@ Status PlanFragmentExecutor::open() {
         _report_thread_started_cv.wait(l);
     }
     Status status = Status::OK();
+    /**
+     * _plan为ExecNode，
+     * ExecNode代表了一个执行节点，be测实际上就是在执行ExecNode树，无论是查询也好，更新也好，一切的操作都是被封装成了ExecNode树。
+     *
+     * 当前PlanFragmentExecutor的open()方法主要就是执行ExecNode树，
+     * 操作根节点（_plan），先调用_plan->open()初始化，再调用_plan->get_next()获取总结果。
+     *
+     * _plan->open()还会调用所有的子节点的open()方法，整个ExecNode树都会完成初始化。
+     * _plan->get_next()：执行当前ExecNode节点的计算任务，同时还会调用所有子节点的get_next方法，该方法会对外返回当前节点的执行结果（非return）。
+     */
     if (_runtime_state->enable_vectorized_exec()) {
         status = open_vectorized_internal();
     } else {
